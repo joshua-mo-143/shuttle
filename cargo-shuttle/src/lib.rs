@@ -20,6 +20,7 @@ use chrono::Utc;
 use clap::{parser::ValueSource, CommandFactory, FromArgMatches};
 use clap_complete::{generate, Shell};
 use clap_mangen::Man;
+use config::ErrorLogManager;
 use crossterm::style::Stylize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Password, Select};
 use flate2::write::GzEncoder;
@@ -245,6 +246,14 @@ impl Shuttle {
             Command::Login(login_args) => self.login(login_args, args.offline).await,
             Command::Logout(logout_args) => self.logout(logout_args).await,
             Command::Feedback => self.feedback(),
+            Command::Explain(args) => {
+                if args.workspace {
+                    println!("The workspace option is enabled!");
+                    todo!("Include file contents from listed file with error");
+                } else {
+                    self.explain()
+                }
+            }
             Command::Run(run_args) => {
                 if self.beta {
                     self.local_run_beta(run_args).await
@@ -1733,16 +1742,14 @@ impl Shuttle {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
         let re = Regex::new(r#"error\[(?<error_code>E[0-9]{4})]"#)?;
+        let error_logs = ErrorLogManager;
         tokio::task::spawn(async move {
             while let Some(line) = rx.recv().await {
                 println!("{line}");
 
                 if let Some(captured) = re.captures(&line) {
-                    let mut file_opts = OpenOptions::new();
-                    file_opts.write(true).append(true).create(true);
-                    let mut file = file_opts.open("foo.txt").unwrap();
-                    let text_to_append = format!("{}\n", captured["error_code"].to_owned());
-                    file.write(&text_to_append.into_bytes()).unwrap();
+                    let error = format!("{}\n", captured["error_code"].to_owned());
+                    error_logs.write(error);
                 }
             }
         });
@@ -3074,6 +3081,14 @@ impl Shuttle {
         debug!("Archive size: {} bytes", bytes.len());
 
         Ok(bytes)
+    }
+
+    fn explain(&self) -> Result<CommandOutcome> {
+        let error_logs = ErrorLogManager;
+        let latest_error = error_logs.fetch();
+        println!("{latest_error}");
+
+        Ok(CommandOutcome::Ok)
     }
 }
 

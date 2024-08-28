@@ -1,14 +1,16 @@
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use shuttle_common::constants::API_URL_BETA;
 use shuttle_common::{constants::API_URL_DEFAULT, ApiKey};
 use tracing::trace;
 
 use crate::args::ProjectArgs;
+use crate::CommandOutcome;
 
 /// Helper trait for dispatching fs ops for different config files
 pub trait ConfigManager: Sized {
@@ -91,6 +93,54 @@ impl ConfigManager for GlobalConfigManager {
 
     fn file(&self) -> PathBuf {
         PathBuf::from("config.toml")
+    }
+}
+
+pub struct ErrorLogManager;
+
+impl ConfigManager for ErrorLogManager {
+    fn directory(&self) -> PathBuf {
+        let shuttle_config_dir = dirs::config_dir()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Could not find a configuration directory. Your operating system may not be supported."
+                    )
+                })
+                .unwrap();
+        shuttle_config_dir.join("shuttle")
+    }
+
+    fn file(&self) -> PathBuf {
+        PathBuf::from("logs.txt")
+    }
+}
+
+impl ErrorLogManager {
+    pub fn write(&self, to_add: String) {
+        let time = Utc::now().format("%Y-%m-%d %H:%M");
+        let to_add = format!("{time}||{to_add}");
+        let logfile = self.directory().join(self.file());
+
+        let mut file = OpenOptions::new();
+        file.append(true).create(true);
+
+        let mut file_handle = file.open(logfile).unwrap();
+
+        file_handle.write_all(to_add.as_bytes()).unwrap();
+    }
+
+    pub fn fetch(&self) -> String {
+        let logfile = self.directory().join(self.file());
+
+        let mut buf = String::new();
+        File::open(logfile)
+            .unwrap()
+            .read_to_string(&mut buf)
+            .unwrap();
+
+        let latest_log = buf.lines().rev().next().unwrap().to_string();
+
+        latest_log
     }
 }
 
