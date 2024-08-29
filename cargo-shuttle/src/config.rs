@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use shuttle_common::constants::API_URL_BETA;
 use shuttle_common::{constants::API_URL_DEFAULT, ApiKey};
@@ -96,6 +97,43 @@ impl ConfigManager for GlobalConfigManager {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ErrorLog {
+    raw: String,
+    error_code: Option<String>,
+    error_message: String,
+    crate_name: String,
+    file_source: String,
+    src: String,
+    file_line: u16,
+    file_col: u16,
+}
+
+#[derive(Clone, Debug)]
+pub struct ErrorLogBuilder(Vec<String>);
+
+impl ErrorLogBuilder {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn try_capture(mut self, pattern: Regex, item: &str) -> Self {
+        if pattern.is_match(item) {
+            self.0.push(item.to_owned());
+        }
+
+        self
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.0.len() == 2
+    }
+
+    pub fn build(self) -> String {
+        self.0.join(" ")
+    }
+}
+
 pub struct ErrorLogManager;
 
 impl ConfigManager for ErrorLogManager {
@@ -117,12 +155,10 @@ impl ConfigManager for ErrorLogManager {
 
 impl ErrorLogManager {
     pub fn write(&self, to_add: String) {
-        let time = Utc::now().format("%Y-%m-%d %H:%M");
-        let to_add = format!("{time}||{to_add}");
         let logfile = self.directory().join(self.file());
 
         let mut file = OpenOptions::new();
-        file.append(true).create(true);
+        file.write(true).append(true).create(true);
 
         let mut file_handle = file.open(logfile).unwrap();
 
@@ -138,7 +174,7 @@ impl ErrorLogManager {
             .read_to_string(&mut buf)
             .unwrap();
 
-        let latest_log = buf.lines().rev().next().unwrap().to_string();
+        let latest_log = buf.lines().next_back().unwrap().to_string();
 
         latest_log
     }

@@ -20,7 +20,7 @@ use chrono::Utc;
 use clap::{parser::ValueSource, CommandFactory, FromArgMatches};
 use clap_complete::{generate, Shell};
 use clap_mangen::Man;
-use config::ErrorLogManager;
+use config::{ErrorLogBuilder, ErrorLogManager};
 use crossterm::style::Stylize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Password, Select};
 use flate2::write::GzEncoder;
@@ -1741,15 +1741,40 @@ impl Shuttle {
         trace!("starting a local run with args: {run_args:?}");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
-        let re = Regex::new(r#"error\[(?<error_code>E[0-9]{4})]"#)?;
+        let re1_error_code = Regex::new(r"\[E(?<error_code>\d{4})\]")?;
+        let re1_plain =
+            Regex::new(r"\\\\u\{1b\}\\\[0m\\\\u\{1b\}\\\[1m\\\\u\{1b\}\\\[38;5;9merror")?;
+        let re1_warning = Regex::new(r"^warning")?;
+        let re2 = Regex::new(r"--> (?<cap>[\W\w]+.rs)")?;
+
         let error_logs = ErrorLogManager;
+
         tokio::task::spawn(async move {
             while let Some(line) = rx.recv().await {
                 println!("{line}");
+                if let Some(cap) = re1_error_code.captures(&line.to_string()) {
+                    let time = Utc::now().format("%Y-%m-%d %H:%M:%S");
+                    let to_add = format!("{time}||error||{}", cap["error_code"].to_string());
+                    error_logs.write(to_add);
+                } else if line.contains("error")
+                    && !line.contains("generated")
+                    && !line.contains("rustc --explain")
+                    && !line.contains("could not compile")
+                {
+                    let time = Utc::now().format("%Y-%m-%d %H:%M:%S");
+                    let to_add = format!("{time}||error||{line}");
+                    error_logs.write(to_add);
+                } else if line.contains("warning")
+                    && !line.contains("generated")
+                    && !line.contains("could not compile")
+                {
+                    let time = Utc::now().format("%Y-%m-%d %H:%M:%S");
+                    let to_add = format!("{time}||warning||{line}");
+                    error_logs.write(to_add);
+                }
 
-                if let Some(captured) = re.captures(&line) {
-                    let error = format!("{}\n", captured["error_code"].to_owned());
-                    error_logs.write(error);
+                if let Some(cap) = re2.captures(&line) {
+                    error_logs.write(format!("||{}\n", cap["cap"].to_string()));
                 }
             }
         });
