@@ -20,7 +20,7 @@ use chrono::Utc;
 use clap::{parser::ValueSource, CommandFactory, FromArgMatches};
 use clap_complete::{generate, Shell};
 use clap_mangen::Man;
-use config::{ErrorLogBuilder, ErrorLogManager};
+use config::{ErrorLog, ErrorLogManager};
 use crossterm::style::Stylize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Password, Select};
 use flate2::write::GzEncoder;
@@ -1741,40 +1741,62 @@ impl Shuttle {
         trace!("starting a local run with args: {run_args:?}");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
-        let re1_error_code = Regex::new(r"\[E(?<error_code>\d{4})\]")?;
-        let re1_plain =
-            Regex::new(r"\\\\u\{1b\}\\\[0m\\\\u\{1b\}\\\[1m\\\\u\{1b\}\\\[38;5;9merror")?;
-        let re1_warning = Regex::new(r"^warning")?;
-        let re2 = Regex::new(r"--> (?<cap>[\W\w]+.rs)")?;
+        let re1_error_code =
+            Regex::new(r"^error\[E(?<error_code>\d{4})\]: (?<error_message>[\W\w\`]+)")?;
+        let re1_no_error_code = Regex::new(r"^error: (?<error_message>[\W\w\`]+)")?;
+        let re1_warning = Regex::new(r"^warning: (?<error_message>[\W\w\`]+)")?;
+        let re_remove_ansi = Regex::new(r"\x1B\[[0-9;]*[mGKHF]")?;
+
+        let re2 =
+            Regex::new(r"--> (?<file_src>[\W\w]+.rs):(?<file_loc>\d{1,5}):(?<file_col>\d{1,5})")?;
 
         let error_logs = ErrorLogManager;
 
         tokio::task::spawn(async move {
             while let Some(line) = rx.recv().await {
                 println!("{line}");
-                if let Some(cap) = re1_error_code.captures(&line.to_string()) {
-                    let time = Utc::now().format("%Y-%m-%d %H:%M:%S");
-                    let to_add = format!("{time}||error||{}", cap["error_code"].to_string());
-                    error_logs.write(to_add);
-                } else if line.contains("error")
-                    && !line.contains("generated")
-                    && !line.contains("rustc --explain")
-                    && !line.contains("could not compile")
-                {
-                    let time = Utc::now().format("%Y-%m-%d %H:%M:%S");
-                    let to_add = format!("{time}||error||{line}");
-                    error_logs.write(to_add);
-                } else if line.contains("warning")
-                    && !line.contains("generated")
-                    && !line.contains("could not compile")
-                {
-                    let time = Utc::now().format("%Y-%m-%d %H:%M:%S");
-                    let to_add = format!("{time}||warning||{line}");
+                let new_line = re_remove_ansi.replace_all(&line, "");
+                let time = Utc::now().timestamp();
+
+                if let Some(cap) = re1_error_code.captures(&new_line) {
+                    let to_add = format!(
+                        "{time}||error||{}||{}",
+                        cap["error_code"].to_string(),
+                        cap["error_message"].to_string()
+                    );
+
                     error_logs.write(to_add);
                 }
 
-                if let Some(cap) = re2.captures(&line) {
-                    error_logs.write(format!("||{}\n", cap["cap"].to_string()));
+                if let Some(cap) = re1_no_error_code.captures(&new_line) {
+                    if !cap["error_message"].contains("could not compile") {
+                        let to_add =
+                            format!("{time}||error||none||{}", cap["error_message"].to_string());
+
+                        error_logs.write(to_add);
+                    }
+                }
+
+                if let Some(cap) = re1_warning.captures(&new_line) {
+                    if !cap["error_message"].contains("generated") {
+                        let to_add = format!(
+                            "{time}||warning||none||{}",
+                            cap["error_message"].to_string()
+                        );
+
+                        error_logs.write(to_add);
+                    }
+                }
+
+                if let Some(cap) = re2.captures(&new_line) {
+                    let to_add = format!(
+                        "||{}||{}||{}\n",
+                        cap["file_src"].to_string(),
+                        cap["file_loc"].to_string(),
+                        cap["file_col"].to_string()
+                    );
+
+                    error_logs.write(to_add);
                 }
             }
         });
@@ -3111,7 +3133,7 @@ impl Shuttle {
     fn explain(&self) -> Result<CommandOutcome> {
         let error_logs = ErrorLogManager;
         let latest_error = error_logs.fetch();
-        println!("{latest_error}");
+        println!("{latest_error:?}");
 
         Ok(CommandOutcome::Ok)
     }

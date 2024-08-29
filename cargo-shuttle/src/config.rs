@@ -1,9 +1,10 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use shuttle_common::constants::API_URL_BETA;
@@ -97,40 +98,47 @@ impl ConfigManager for GlobalConfigManager {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ErrorLog {
     raw: String,
+    datetime: DateTime<Utc>,
     error_code: Option<String>,
     error_message: String,
-    crate_name: String,
     file_source: String,
-    src: String,
     file_line: u16,
     file_col: u16,
 }
 
-#[derive(Clone, Debug)]
-pub struct ErrorLogBuilder(Vec<String>);
-
-impl ErrorLogBuilder {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-
-    pub fn try_capture(mut self, pattern: Regex, item: &str) -> Self {
-        if pattern.is_match(item) {
-            self.0.push(item.to_owned());
+impl ErrorLog {
+    pub fn try_new(input: Vec<String>) -> Self {
+        let timestamp = input[0].parse::<i64>().unwrap();
+        Self {
+            raw: input.join("||"),
+            datetime: DateTime::from_timestamp(timestamp, 0).unwrap(),
+            error_code: if *input.get(2).unwrap() != "none" {
+                Some(input[2].clone())
+            } else {
+                None
+            },
+            error_message: input[3].clone(),
+            file_source: input[4].clone(),
+            file_line: input[5].parse().unwrap(),
+            file_col: input[6].parse().unwrap(),
         }
-
-        self
     }
 
-    pub fn is_ready(&self) -> bool {
-        self.0.len() == 2
-    }
+    pub fn rustc_error(&self) -> Option<String> {
+        if let Some(error_code) = self.error_code.clone() {
+            let error_code = format!("E{}", error_code);
+            let rust_explain = Command::new("rustc")
+                .args(["--explain", &error_code])
+                .output()
+                .unwrap();
 
-    pub fn build(self) -> String {
-        self.0.join(" ")
+            Some(String::from_utf8(rust_explain.stdout).unwrap())
+        } else {
+            None
+        }
     }
 }
 
@@ -165,7 +173,7 @@ impl ErrorLogManager {
         file_handle.write_all(to_add.as_bytes()).unwrap();
     }
 
-    pub fn fetch(&self) -> String {
+    pub fn fetch(&self) -> Vec<ErrorLog> {
         let logfile = self.directory().join(self.file());
 
         let mut buf = String::new();
@@ -174,9 +182,24 @@ impl ErrorLogManager {
             .read_to_string(&mut buf)
             .unwrap();
 
-        let latest_log = buf.lines().next_back().unwrap().to_string();
+        let mut logs_by_latest = buf.lines().rev();
+        let thing = logs_by_latest.next().unwrap().to_string();
+        let thing: Vec<String> = thing.split("||").map(ToString::to_string).collect();
+        let thing_as_str = ErrorLog::try_new(thing);
+        let mut thing_vec: Vec<ErrorLog> = vec![thing_as_str.clone()];
 
-        latest_log
+        let timestamp = thing_as_str.datetime.timestamp();
+
+        while let Some(log) = logs_by_latest.next() {
+            let thing: Vec<String> = log.split("||").map(ToString::to_string).collect();
+            if thing[0].parse::<i64>().unwrap() != timestamp {
+                break;
+            }
+
+            thing_vec.push(ErrorLog::try_new(thing));
+        }
+
+        thing_vec
     }
 }
 
