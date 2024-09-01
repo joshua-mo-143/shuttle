@@ -1072,10 +1072,14 @@ impl Shuttle {
                 // Active deployment
                 deployment.id.to_string()
             } else {
-                bail!(
+                let error = format!(
                     "Could not find a running deployment for '{proj_name}'. \
                     Try with '--latest', or pass a deployment ID manually"
                 );
+                let error_logs = ErrorLogManager;
+
+                error_logs.write_generic_error(error);
+                bail!(error);
             }
         };
 
@@ -1225,7 +1229,10 @@ impl Shuttle {
                 .get_deployment_details(
                     self.ctx.project_name(),
                     &Uuid::from_str(&deployment_id).map_err(|err| {
-                        anyhow!("Provided deployment id is not a valid UUID: {err}")
+                        let err = format!("Provided deployment id is not a valid UUID: {err}");
+                        let e = ErrorLogManager;
+                        e.write_generic_error(err);
+                        anyhow!(err);
                     })?,
                 )
                 .await
@@ -1513,6 +1520,8 @@ impl Shuttle {
 
         if !response.success {
             error!(error = response.message, "failed to load your service");
+            let e = ErrorLogManager;
+            e.write_generic_error(format!("failed to load your service: {}", response.message));
             return Ok(None);
         }
 
@@ -1606,14 +1615,17 @@ impl Shuttle {
                     if shuttle_resource.version == RESOURCE_SCHEMA_VERSION {
                         Ok((bytes, shuttle_resource))
                     } else {
-                        Err(anyhow!("
+                    let err = format!("
                             Shuttle resource request for {} with incompatible version found. Expected {}, found {}. \
                             Make sure that this deployer and the Shuttle resource are up to date.
                             ",
                             shuttle_resource.r#type,
                             RESOURCE_SCHEMA_VERSION,
                             shuttle_resource.version
-                        ))
+                    );
+                        let logs = ErrorLogManager;
+                        logs.write_generic_error(err.to_owned());
+                        Err(anyhow!(err))
                     }
                 }).collect::<anyhow::Result<Vec<_>>>()?.into_iter()
         {
@@ -1672,7 +1684,16 @@ impl Shuttle {
                 resource::Type::Container => {
                     let config = serde_json::from_value(shuttle_resource.config)
                         .context("deserializing resource config")?;
-                    let res = prov.start_container(config).await.context("Failed to start Docker container. Make sure that a Docker engine is running.")?;
+                    let err = "Failed to start Docker container. Make sure that a Docker engine is running.";
+                    let logs = ErrorLogManager;
+                    let res = match prov.start_container(config).await {
+                        Ok(res) => res,
+                        Err(_) => {
+                            logs.write_generic_error(err.to_owned());
+                            return Err(anyhow!(err))
+                        }
+                    };
+
                     *bytes = serde_json::to_vec(&ShuttleResourceOutput {
                         output: res,
                         custom: shuttle_resource.custom,
@@ -3185,6 +3206,11 @@ fn is_dirty(repo: &Repository) -> Result<()> {
         writeln!(error).expect("to append error");
         writeln!(error, "To proceed despite this and include the uncommitted changes, pass the `--allow-dirty` or `--ad` flag").expect("to append error");
 
+        let error_logs = ErrorLogManager;
+
+        let time = Utc::now().timestamp();
+        let to_add = format!("{time}||error||none||{error}||none||none||none\n");
+        error_logs.write(to_add);
         bail!(error);
     }
 

@@ -173,6 +173,20 @@ impl ErrorLogManager {
         file_handle.write_all(to_add.as_bytes()).unwrap();
     }
 
+    pub fn write_generic_error(&self, to_add: String) {
+        let time = Utc::now().timestamp();
+        let logfile = self.directory().join(self.file());
+
+        let mut file = OpenOptions::new();
+        file.write(true).append(true).create(true);
+
+        let mut file_handle = file.open(logfile).unwrap();
+
+        let message = format!("{time}||error||none||{to_add}||none||none||none\n");
+
+        file_handle.write_all(message.as_bytes()).unwrap();
+    }
+
     pub fn fetch(&self) -> Vec<ErrorLog> {
         let logfile = self.directory().join(self.file());
 
