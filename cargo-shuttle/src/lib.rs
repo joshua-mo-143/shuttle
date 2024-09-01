@@ -7,7 +7,7 @@ mod suggestions;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::fmt::Write as FmtWrite;
-use std::fs::{read_to_string, File, OpenOptions};
+use std::fs::{read_to_string, File};
 use std::io::{stdout, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use chrono::Utc;
 use clap::{parser::ValueSource, CommandFactory, FromArgMatches};
 use clap_complete::{generate, Shell};
 use clap_mangen::Man;
-use config::{ErrorLog, ErrorLogManager};
+use config::ErrorLogManager;
 use crossterm::style::Stylize;
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, Password, Select};
 use flate2::write::GzEncoder;
@@ -1078,7 +1078,7 @@ impl Shuttle {
                 );
                 let error_logs = ErrorLogManager;
 
-                error_logs.write_generic_error(error);
+                error_logs.write_generic_error(error.to_owned());
                 bail!(error);
             }
         };
@@ -1229,10 +1229,11 @@ impl Shuttle {
                 .get_deployment_details(
                     self.ctx.project_name(),
                     &Uuid::from_str(&deployment_id).map_err(|err| {
-                        let err = format!("Provided deployment id is not a valid UUID: {err}");
+                        let err_as_str =
+                            format!("Provided deployment id is not a valid UUID: {err}");
                         let e = ErrorLogManager;
-                        e.write_generic_error(err);
-                        anyhow!(err);
+                        e.write_generic_error(err_as_str);
+                        anyhow!(err)
                     })?,
                 )
                 .await
@@ -1782,8 +1783,7 @@ impl Shuttle {
                 if let Some(cap) = re1_error_code.captures(&new_line) {
                     let to_add = format!(
                         "{time}||error||{}||{}",
-                        cap["error_code"].to_string(),
-                        cap["error_message"].to_string()
+                        &cap["error_code"], &cap["error_message"]
                     );
 
                     error_logs.write(to_add);
@@ -1791,8 +1791,7 @@ impl Shuttle {
 
                 if let Some(cap) = re1_no_error_code.captures(&new_line) {
                     if !cap["error_message"].contains("could not compile") {
-                        let to_add =
-                            format!("{time}||error||none||{}", cap["error_message"].to_string());
+                        let to_add = format!("{time}||error||none||{}", &cap["error_message"]);
 
                         error_logs.write(to_add);
                     }
@@ -1800,10 +1799,7 @@ impl Shuttle {
 
                 if let Some(cap) = re1_warning.captures(&new_line) {
                     if !cap["error_message"].contains("generated") {
-                        let to_add = format!(
-                            "{time}||warning||none||{}",
-                            cap["error_message"].to_string()
-                        );
+                        let to_add = format!("{time}||warning||none||{}", &cap["error_message"]);
 
                         error_logs.write(to_add);
                     }
@@ -1812,9 +1808,7 @@ impl Shuttle {
                 if let Some(cap) = re2.captures(&new_line) {
                     let to_add = format!(
                         "||{}||{}||{}\n",
-                        cap["file_src"].to_string(),
-                        cap["file_loc"].to_string(),
-                        cap["file_col"].to_string()
+                        &cap["file_src"], &cap["file_loc"], &cap["file_col"]
                     );
 
                     error_logs.write(to_add);

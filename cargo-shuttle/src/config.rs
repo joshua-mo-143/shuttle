@@ -5,14 +5,12 @@ use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use shuttle_common::constants::API_URL_BETA;
 use shuttle_common::{constants::API_URL_DEFAULT, ApiKey};
 use tracing::trace;
 
 use crate::args::ProjectArgs;
-use crate::CommandOutcome;
 
 /// Helper trait for dispatching fs ops for different config files
 pub trait ConfigManager: Sized {
@@ -204,7 +202,7 @@ impl ErrorLogManager {
 
         let timestamp = thing_as_str.datetime.timestamp();
 
-        while let Some(log) = logs_by_latest.next() {
+        for log in logs_by_latest {
             let thing: Vec<String> = log.split("||").map(ToString::to_string).collect();
             if thing[0].parse::<i64>().unwrap() != timestamp {
                 break;
