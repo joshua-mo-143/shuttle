@@ -199,7 +199,7 @@ impl ErrorLogManager {
         file_handle.write_all(message.as_bytes()).unwrap();
     }
 
-    pub fn fetch(&self) -> Vec<ErrorLog> {
+    pub fn fetch_last_error(&self) -> Vec<ErrorLog> {
         let logfile = self.directory().join(self.file());
 
         let mut buf = String::new();
@@ -226,6 +226,56 @@ impl ErrorLogManager {
         }
 
         thing_vec
+    }
+
+    pub fn fetch_file_contents_from_errlogs(&self, vec: Vec<ErrorLog>) -> Vec<FileContents> {
+        vec.into_iter()
+            .filter(|x| x.file_source.is_some())
+            .map(|x| FileContents::new(x.file_source.unwrap()))
+            .collect()
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ExplainStruct {
+    logs: Vec<ErrorLog>,
+    file_contents: Vec<FileContents>,
+}
+
+impl From<Vec<ErrorLog>> for ExplainStruct {
+    fn from(logs: Vec<ErrorLog>) -> Self {
+        Self {
+            logs,
+            file_contents: Vec::new(),
+        }
+    }
+}
+
+impl ExplainStruct {
+    pub fn fetch_file_contents_from_errlogs(mut self) -> Self {
+        self.file_contents = self
+            .logs
+            .clone()
+            .into_iter()
+            .filter(|x| x.file_source.is_some())
+            .map(|x| FileContents::new(x.file_source.expect("to have an existing filesource")))
+            .collect();
+
+        self
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct FileContents {
+    path: String,
+    contents: String,
+}
+
+impl FileContents {
+    fn new(path: String) -> Self {
+        let contents = std::fs::read_to_string(&path).expect("to read file");
+
+        Self { path, contents }
     }
 }
 
