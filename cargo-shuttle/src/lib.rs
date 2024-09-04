@@ -1772,11 +1772,12 @@ impl Shuttle {
 
         let error_logs = ErrorLogManager;
 
+        let time = Utc::now().timestamp();
+
         tokio::task::spawn(async move {
             while let Some(line) = rx.recv().await {
                 println!("{line}");
                 let new_line = re_remove_ansi.replace_all(&line, "");
-                let time = Utc::now().timestamp();
 
                 if let Some(cap) = re1_error_code.captures(&new_line) {
                     let to_add = format!(
