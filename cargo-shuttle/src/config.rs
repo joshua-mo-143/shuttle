@@ -3,14 +3,12 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use shuttle_common::constants::API_URL_BETA;
 use shuttle_common::{constants::API_URL_DEFAULT, ApiKey};
-use tokio::fs::read_to_string;
 use tracing::trace;
-use zip::write::FileOptions;
 
 use crate::args::ProjectArgs;
 
@@ -110,9 +108,12 @@ pub struct ErrorLog {
 }
 
 impl ErrorLog {
-    pub fn try_new(input: Vec<String>) -> Self {
-        let timestamp = input[0].parse::<i64>().unwrap();
-        Self {
+    pub fn try_new(input: Vec<String>) -> Result<Self, anyhow::Error> {
+        let timestamp = match input[0].parse::<i64>() {
+            Ok(timestamp) => timestamp,
+            Err(e) => bail!("Expected i64-compatible string, got {e}"),
+        };
+        Ok(Self {
             raw: input.join("||"),
             datetime: DateTime::from_timestamp(timestamp, 0).unwrap(),
             error_code: if &*input[2] != "none" {
@@ -136,7 +137,7 @@ impl ErrorLog {
             } else {
                 None
             },
-        }
+        })
     }
 
     pub fn rustc_error(&self) -> Option<String> {
@@ -199,7 +200,7 @@ impl ErrorLogManager {
         file_handle.write_all(message.as_bytes()).unwrap();
     }
 
-    pub fn fetch_last_error(&self) -> Vec<ErrorLog> {
+    pub fn fetch_last_error_from_file(&self) -> Vec<ErrorLog> {
         let logfile = self.directory().join(self.file());
 
         let mut buf = String::new();
@@ -211,7 +212,7 @@ impl ErrorLogManager {
         let mut logs_by_latest = buf.lines().rev();
         let thing = logs_by_latest.next().unwrap().to_string();
         let thing: Vec<String> = thing.split("||").map(ToString::to_string).collect();
-        let thing_as_str = ErrorLog::try_new(thing);
+        let thing_as_str = ErrorLog::try_new(thing).unwrap();
         let mut thing_vec: Vec<ErrorLog> = vec![thing_as_str.clone()];
 
         let timestamp = thing_as_str.datetime.timestamp();
@@ -222,17 +223,10 @@ impl ErrorLogManager {
                 break;
             }
 
-            thing_vec.push(ErrorLog::try_new(thing));
+            thing_vec.push(ErrorLog::try_new(thing).unwrap());
         }
 
         thing_vec
-    }
-
-    pub fn fetch_file_contents_from_errlogs(&self, vec: Vec<ErrorLog>) -> Vec<FileContents> {
-        vec.into_iter()
-            .filter(|x| x.file_source.is_some())
-            .map(|x| FileContents::new(x.file_source.unwrap()))
-            .collect()
     }
 }
 
@@ -242,6 +236,33 @@ pub struct ExplainStruct {
     file_contents: Vec<FileContents>,
 }
 
+impl TryFrom<String> for ExplainStruct {
+    type Error = anyhow::Error;
+    fn try_from(input: String) -> Result<Self, Self::Error> {
+        let mut logs_by_latest = input.lines().rev();
+        let thing = logs_by_latest.next().unwrap().to_string();
+        let thing: Vec<String> = thing.split("||").map(ToString::to_string).collect();
+        println!("{thing:?}");
+        let thing_as_str = ErrorLog::try_new(thing).unwrap();
+        let mut logs: Vec<ErrorLog> = vec![thing_as_str.clone()];
+
+        let timestamp = thing_as_str.datetime.timestamp();
+
+        for log in logs_by_latest {
+            let thing: Vec<String> = log.split("||").map(ToString::to_string).collect();
+            if thing[0].parse::<i64>().unwrap() != timestamp {
+                break;
+            }
+
+            logs.push(ErrorLog::try_new(thing).expect("Error while converting String to ErrorLog"));
+        }
+
+        Ok(Self {
+            logs,
+            file_contents: Vec::new(),
+        })
+    }
+}
 impl From<Vec<ErrorLog>> for ExplainStruct {
     fn from(logs: Vec<ErrorLog>) -> Self {
         Self {
@@ -253,13 +274,18 @@ impl From<Vec<ErrorLog>> for ExplainStruct {
 
 impl ExplainStruct {
     pub fn fetch_file_contents_from_errlogs(mut self) -> Self {
-        self.file_contents = self
+        let mut file_contents = self
             .logs
             .clone()
             .into_iter()
             .filter(|x| x.file_source.is_some())
             .map(|x| FileContents::new(x.file_source.expect("to have an existing filesource")))
-            .collect();
+            .collect::<Vec<FileContents>>();
+
+        file_contents.sort_by(|a, b| a.path.partial_cmp(&b.path).unwrap());
+        file_contents.dedup_by_key(|key| key.path.to_owned());
+
+        self.file_contents = file_contents;
 
         self
     }
@@ -593,7 +619,7 @@ mod tests {
 
     use crate::{args::ProjectArgs, config::RequestContext};
 
-    use super::{Config, LocalConfigManager, ProjectConfig};
+    use super::{Config, ExplainStruct, LocalConfigManager, ProjectConfig};
 
     fn path_from_workspace_root(path: &str) -> PathBuf {
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
@@ -639,5 +665,37 @@ mod tests {
         let local_config = RequestContext::get_local_config(&project_args).unwrap();
 
         assert_eq!(unwrap_project_name(&local_config), "my-fancy-project-name");
+    }
+
+    #[test]
+    fn parsing_error_logs() {
+        let project_args = ProjectArgs {
+            working_directory: path_from_workspace_root("examples/axum/hello-world/src"),
+            name: None,
+        };
+
+        let wd = project_args
+            .working_directory
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string();
+
+        let explain_logs: ExplainStruct = format!(
+            "1724950779||error||none||expected `;`, found `Ok`||{wd}/main.rs||10||60
+1724950880||error||none||expected `;`, found `Ok`||{wd}/main.rs||10||60
+1724950880||error||none||expected `;`||{wd}/main.rs||12||5
+1724950880||warning||none||unused import: `routes`||{wd}/main.rs||1||19
+1724950880||error||0601||`main` function not found in crate `hello_world`||{wd}/main.rs||13||2"
+        )
+        .try_into()
+        .expect("Failed to parse string to explain struct");
+
+        let explain_logs = explain_logs.fetch_file_contents_from_errlogs();
+
+        // The logs should only grab the latest errors that all have the same timestamp (first column)
+        assert_eq!(explain_logs.logs.len(), 4);
+
+        assert_eq!(explain_logs.file_contents.len(), 1);
     }
 }

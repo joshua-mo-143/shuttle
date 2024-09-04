@@ -250,9 +250,9 @@ impl Shuttle {
             Command::Explain(args) => self.explain(args).await,
             Command::Run(run_args) => {
                 if self.beta {
-                    self.local_run_beta(run_args).await
+                    self.local_run_beta(run_args, args.project_args).await
                 } else {
-                    self.local_run(run_args).await
+                    self.local_run(run_args, args.project_args).await
                 }
             }
             Command::Deploy(deploy_args) => self.deploy(deploy_args).await,
@@ -1753,7 +1753,11 @@ impl Shuttle {
         Ok(())
     }
 
-    async fn pre_local_run(&self, run_args: &RunArgs) -> Result<Vec<BuiltService>> {
+    async fn pre_local_run(
+        &self,
+        run_args: &RunArgs,
+        proj_args: ProjectArgs,
+    ) -> Result<Vec<BuiltService>> {
         trace!("starting a local run with args: {run_args:?}");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(256);
@@ -1800,9 +1804,18 @@ impl Shuttle {
                 }
 
                 if let Some(cap) = re2.captures(&new_line) {
+                    let path = proj_args
+                        .workspace_path()
+                        .expect("to find workspace path")
+                        .join(&cap["file_src"])
+                        .canonicalize()
+                        .unwrap();
+                    println!("{}", path.display());
                     let to_add = format!(
                         "||{}||{}||{}\n",
-                        &cap["file_src"], &cap["file_loc"], &cap["file_col"]
+                        path.display(),
+                        &cap["file_loc"],
+                        &cap["file_col"]
                     );
 
                     error_logs.write(to_add);
@@ -1866,8 +1879,12 @@ impl Shuttle {
     }
 
     #[cfg(target_family = "unix")]
-    async fn local_run(&self, mut run_args: RunArgs) -> Result<CommandOutcome> {
-        let services = self.pre_local_run(&run_args).await?;
+    async fn local_run(
+        &self,
+        mut run_args: RunArgs,
+        proj_args: ProjectArgs,
+    ) -> Result<CommandOutcome> {
+        let services = self.pre_local_run(&run_args, proj_args).await?;
 
         let mut sigterm_notif =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -1979,9 +1996,13 @@ impl Shuttle {
         Ok(CommandOutcome::Ok)
     }
 
-    async fn local_run_beta(&self, mut run_args: RunArgs) -> Result<CommandOutcome> {
+    async fn local_run_beta(
+        &self,
+        mut run_args: RunArgs,
+        proj_args: ProjectArgs,
+    ) -> Result<CommandOutcome> {
         let project_name = self.ctx.project_name().to_owned();
-        let services = self.pre_local_run(&run_args).await?;
+        let services = self.pre_local_run(&run_args, proj_args).await?;
         let service = services
             .first()
             .expect("at least one shuttle service")
@@ -3141,7 +3162,7 @@ impl Shuttle {
 
     async fn explain(&self, args: ExplainArgs) -> Result<CommandOutcome> {
         let error_logs = ErrorLogManager;
-        let logs = error_logs.fetch_last_error();
+        let logs = error_logs.fetch_last_error_from_file();
 
         let mut json_data: ExplainStruct = logs.into();
 
