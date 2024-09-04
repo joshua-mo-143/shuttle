@@ -86,7 +86,7 @@ use crate::args::{
     TemplateLocation,
 };
 pub use crate::args::{Command, ProjectArgs, RunArgs, ShuttleArgs};
-use crate::config::RequestContext;
+use crate::config::{ExplainStruct, RequestContext};
 use crate::provisioner_server::beta::{ProvApiState, ProvisionerServerBeta};
 use crate::provisioner_server::LocalProvisioner;
 
@@ -3139,15 +3139,21 @@ impl Shuttle {
         Ok(bytes)
     }
 
-    async fn explain(&self, _args: ExplainArgs) -> Result<CommandOutcome> {
+    async fn explain(&self, args: ExplainArgs) -> Result<CommandOutcome> {
         let error_logs = ErrorLogManager;
-        let latest_error = error_logs.fetch();
+        let logs = error_logs.fetch_last_error();
+
+        let mut json_data: ExplainStruct = logs.into();
+
+        if args.send_files {
+            json_data = json_data.fetch_file_contents_from_errlogs();
+        }
 
         let url =
             "https://94rdm7c9oj.execute-api.eu-west-2.amazonaws.com/default/cargo-shuttle-explain";
 
         let ctx = reqwest::Client::new();
-        let res = ctx.post(url).json(&latest_error).send().await.unwrap();
+        let res = ctx.post(url).json(&json_data).send().await.unwrap();
 
         if res.status() != 200 {
             let error = res.text().await.unwrap();
