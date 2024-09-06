@@ -3118,6 +3118,11 @@ impl Shuttle {
 
         let mut json_data: ExplainStruct = logs.into();
 
+        println!(
+            "Errors to be explained:\n- {}",
+            json_data.fetch_only_error_messages().join("\n- ")
+        );
+
         if args.send_files {
             json_data = json_data.fetch_file_contents_from_errlogs();
         }
@@ -3133,12 +3138,72 @@ impl Shuttle {
             return Err(anyhow!("Request was not successful: {error}"));
         }
 
-        println!("{}", res.text().await.unwrap());
+        let text = res.text().await.unwrap();
+        let formatted_text = process_text_with_code_blocks(&text);
+
+        println!("---");
+        println!("{formatted_text}");
 
         Ok(CommandOutcome::Ok)
     }
 }
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{Style, ThemeSet};
+use syntect::parsing::SyntaxSet;
+use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
 
+fn highlight_rust_code(code: &str) -> String {
+    // Load the syntax set and theme
+    let ps = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+    let theme = &ts.themes["base16-ocean.dark"]; // You can choose other themes as well
+
+    // Use the Rust syntax highlighting
+    let syntax = ps.find_syntax_by_extension("rs").unwrap();
+    let mut h = HighlightLines::new(syntax, theme);
+    let mut highlighted_code = String::new();
+
+    // Iterate over the lines of code and highlight them
+    for line in LinesWithEndings::from(code) {
+        let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ps).unwrap();
+        let escaped = as_24_bit_terminal_escaped(&ranges[..], false);
+        highlighted_code.push_str(&escaped);
+        highlighted_code.push_str("\x1b[0m");
+    }
+
+    highlighted_code
+}
+
+fn process_text_with_code_blocks(text: &str) -> String {
+    // Regex to capture triple backtick code blocks
+    let codeblock_regex = Regex::new(r"```rust\n([\s\S]*?)\n```").unwrap();
+    let codeline_regex = Regex::new(r"`([\s\S]*?)`").unwrap();
+
+    // Replace the code blocks with syntax-highlighted versions
+    let result = codeblock_regex
+        .replace_all(text, |caps: &regex::Captures| {
+            let code_block = &caps[0];
+            let code_block = code_block.replace("`", "");
+            let code_block = code_block.replacen("rust\n", "", 1);
+
+            // Highlight the code block assuming it's Rust
+            let highlighted_code = highlight_rust_code(&code_block);
+
+            format!("{}", highlighted_code) // Wrap the highlighted code back in triple backticks
+        })
+        .to_string();
+
+    let result = codeline_regex.replace_all(&result, |caps: &regex::Captures| {
+        let code_block = &caps[0];
+
+        // Highlight the code block assuming it's Rust
+        let highlighted_code = highlight_rust_code(code_block);
+
+        format!("{}", highlighted_code) // Wrap the highlighted code back in triple backticks
+    });
+
+    result.to_string()
+}
 // /// Can be used during testing
 // async fn get_templates_schema() -> Result<TemplatesSchema> {
 //     Ok(toml::from_str(include_str!(

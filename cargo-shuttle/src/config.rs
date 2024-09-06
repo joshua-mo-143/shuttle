@@ -100,6 +100,7 @@ impl ConfigManager for GlobalConfigManager {
 pub struct ErrorLog {
     raw: String,
     datetime: DateTime<Utc>,
+    error_type: String,
     error_code: Option<String>,
     error_message: String,
     file_source: Option<String>,
@@ -116,6 +117,7 @@ impl ErrorLog {
         Ok(Self {
             raw: input.join("||"),
             datetime: DateTime::from_timestamp(timestamp, 0).unwrap(),
+            error_type: input[1].clone(),
             error_code: if &*input[2] != "none" {
                 Some(input[2].clone())
             } else {
@@ -210,23 +212,29 @@ impl ErrorLogManager {
             .unwrap();
 
         let mut logs_by_latest = buf.lines().rev();
-        let thing = logs_by_latest.next().unwrap().to_string();
-        let thing: Vec<String> = thing.split("||").map(ToString::to_string).collect();
-        let thing_as_str = ErrorLog::try_new(thing).unwrap();
-        let mut thing_vec: Vec<ErrorLog> = vec![thing_as_str.clone()];
+        let log_raw = logs_by_latest.next().unwrap().to_string();
+        let log_raw_as_vec: Vec<String> = log_raw.split("||").map(ToString::to_string).collect();
+        let log = ErrorLog::try_new(log_raw_as_vec).unwrap();
+        let mut logs: Vec<ErrorLog> = if log.error_type == *"error" {
+            vec![log.clone()]
+        } else {
+            vec![]
+        };
 
-        let timestamp = thing_as_str.datetime.timestamp();
+        let timestamp = log.datetime.timestamp();
 
-        for log in logs_by_latest {
-            let thing: Vec<String> = log.split("||").map(ToString::to_string).collect();
+        for log_raw in logs_by_latest {
+            let thing: Vec<String> = log_raw.split("||").map(ToString::to_string).collect();
             if thing[0].parse::<i64>().unwrap() != timestamp {
                 break;
             }
-
-            thing_vec.push(ErrorLog::try_new(thing).unwrap());
+            let log = ErrorLog::try_new(thing).unwrap();
+            if log.error_type == *"error" {
+                logs.push(log);
+            }
         }
 
-        thing_vec
+        logs
     }
 }
 
@@ -248,13 +256,19 @@ impl TryFrom<String> for ExplainStruct {
 
         let timestamp = thing_as_str.datetime.timestamp();
 
-        for log in logs_by_latest {
-            let thing: Vec<String> = log.split("||").map(ToString::to_string).collect();
-            if thing[0].parse::<i64>().unwrap() != timestamp {
+        for log_raw in logs_by_latest {
+            let log_raw_as_vec: Vec<String> =
+                log_raw.split("||").map(ToString::to_string).collect();
+            if log_raw_as_vec[0].parse::<i64>().unwrap() != timestamp {
                 break;
             }
 
-            logs.push(ErrorLog::try_new(thing).expect("Error while converting String to ErrorLog"));
+            let log = ErrorLog::try_new(log_raw_as_vec)
+                .expect("Error while converting String to ErrorLog");
+
+            if log.error_type == *"error" {
+                logs.push(log);
+            }
         }
 
         Ok(Self {
@@ -288,6 +302,10 @@ impl ExplainStruct {
         self.file_contents = file_contents;
 
         self
+    }
+
+    pub fn fetch_only_error_messages(&self) -> Vec<String> {
+        self.logs.iter().cloned().map(|x| x.error_message).collect()
     }
 }
 
