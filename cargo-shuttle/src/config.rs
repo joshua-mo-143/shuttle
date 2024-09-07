@@ -202,12 +202,15 @@ impl ErrorLogManager {
         file_handle.write_all(message.as_bytes()).unwrap();
     }
 
-    pub fn fetch_last_error_from_file(&self) -> Vec<ErrorLog> {
+    pub fn fetch_last_error_from_file(&self) -> anyhow::Result<Vec<ErrorLog>> {
         let logfile = self.directory().join(self.file());
 
         let mut buf = String::new();
-        File::open(logfile)
-            .unwrap()
+        let mut file = OpenOptions::new();
+        file.read(true).create(true);
+
+        file.open(logfile)
+            .expect("Couldn't find logfile")
             .read_to_string(&mut buf)
             .unwrap();
 
@@ -234,7 +237,11 @@ impl ErrorLogManager {
             }
         }
 
-        logs
+        if logs.is_empty() {
+            return Err(anyhow!("There don't seem to be any errors to send."));
+        }
+
+        Ok(logs)
     }
 }
 

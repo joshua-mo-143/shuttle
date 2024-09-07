@@ -3114,7 +3114,7 @@ impl Shuttle {
 
     async fn explain(&self, args: ExplainArgs) -> Result<CommandOutcome> {
         let error_logs = ErrorLogManager;
-        let logs = error_logs.fetch_last_error_from_file();
+        let logs = error_logs.fetch_last_error_from_file()?;
 
         let mut json_data: ExplainStruct = logs.into();
 
@@ -3183,13 +3183,13 @@ fn process_text_with_code_blocks(text: &str) -> String {
     let result = codeblock_regex
         .replace_all(text, |caps: &regex::Captures| {
             let code_block = &caps[0];
-            let code_block = code_block.replace("`", "");
+            let code_block = code_block.replace('`', "");
             let code_block = code_block.replacen("rust\n", "", 1);
 
             // Highlight the code block assuming it's Rust
             let highlighted_code = highlight_rust_code(&code_block);
 
-            format!("{}", highlighted_code) // Wrap the highlighted code back in triple backticks
+            highlighted_code.to_string()
         })
         .to_string();
 
@@ -3199,7 +3199,7 @@ fn process_text_with_code_blocks(text: &str) -> String {
         // Highlight the code block assuming it's Rust
         let highlighted_code = highlight_rust_code(code_block);
 
-        format!("{}", highlighted_code) // Wrap the highlighted code back in triple backticks
+        highlighted_code.to_string()
     });
 
     result.to_string()
