@@ -205,14 +205,20 @@ impl ErrorLogManager {
     pub fn fetch_last_error_from_file(&self) -> anyhow::Result<Vec<ErrorLog>> {
         let logfile = self.directory().join(self.file());
 
-        let mut buf = String::new();
-        let mut file = OpenOptions::new();
-        file.read(true).create(true);
+        if !logfile.is_file() {
+            File::create_new(&logfile).map_err(|e| anyhow!("Could not create logfile: {e}"))?;
+        }
 
-        file.open(logfile)
+        let mut buf = String::new();
+
+        File::open(logfile)
             .expect("Couldn't find logfile")
             .read_to_string(&mut buf)
             .unwrap();
+
+        if buf == String::new() {
+            return Err(anyhow!("There's currently no logs that can be used with `cargo shuttle explain`. Once you have accumulated some errors from using the CLI, you'll be able to send errors from your last command invocation using `cargo shuttle explain`."));
+        }
 
         let mut logs_by_latest = buf.lines().rev();
         let log_raw = logs_by_latest.next().unwrap().to_string();
@@ -257,7 +263,6 @@ impl TryFrom<String> for ExplainStruct {
         let mut logs_by_latest = input.lines().rev();
         let thing = logs_by_latest.next().unwrap().to_string();
         let thing: Vec<String> = thing.split("||").map(ToString::to_string).collect();
-        println!("{thing:?}");
         let thing_as_str = ErrorLog::try_new(thing).unwrap();
         let mut logs: Vec<ErrorLog> = vec![thing_as_str.clone()];
 
