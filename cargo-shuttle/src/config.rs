@@ -10,7 +10,7 @@ use shuttle_common::constants::API_URL_BETA;
 use shuttle_common::{constants::API_URL_DEFAULT, ApiKey};
 use tracing::trace;
 
-use crate::args::ProjectArgs;
+use crate::args::{ExplainArgs, ProjectArgs};
 
 /// Helper trait for dispatching fs ops for different config files
 pub trait ConfigManager: Sized {
@@ -202,7 +202,7 @@ impl ErrorLogManager {
         file_handle.write_all(message.as_bytes()).unwrap();
     }
 
-    pub fn fetch_last_error_from_file(&self) -> anyhow::Result<Vec<ErrorLog>> {
+    pub fn fetch_last_error_from_file(&self, args: &ExplainArgs) -> anyhow::Result<Vec<ErrorLog>> {
         let logfile = self.directory().join(self.file());
 
         if !logfile.is_file() {
@@ -224,7 +224,7 @@ impl ErrorLogManager {
         let log_raw = logs_by_latest.next().unwrap().to_string();
         let log_raw_as_vec: Vec<String> = log_raw.split("||").map(ToString::to_string).collect();
         let log = ErrorLog::try_new(log_raw_as_vec).unwrap();
-        let mut logs: Vec<ErrorLog> = if log.error_type == *"error" {
+        let mut logs: Vec<ErrorLog> = if log.error_type == *"error" || args.warnings {
             vec![log.clone()]
         } else {
             vec![]
@@ -238,13 +238,15 @@ impl ErrorLogManager {
                 break;
             }
             let log = ErrorLog::try_new(thing).unwrap();
-            if log.error_type == *"error" {
+            if log.error_type == *"error" || args.warnings {
                 logs.push(log);
             }
         }
 
         if logs.is_empty() {
-            return Err(anyhow!("There don't seem to be any errors to send."));
+            return Err(anyhow!(
+                "There don't seem to be any errors or warnings to send."
+            ));
         }
 
         Ok(logs)

@@ -3114,7 +3114,7 @@ impl Shuttle {
 
     async fn explain(&self, args: ExplainArgs) -> Result<CommandOutcome> {
         let error_logs = ErrorLogManager;
-        let logs = error_logs.fetch_last_error_from_file()?;
+        let logs = error_logs.fetch_last_error_from_file(&args)?;
 
         let mut json_data: ExplainStruct = logs.into();
 

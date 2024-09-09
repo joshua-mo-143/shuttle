@@ -146,6 +146,9 @@ pub struct ExplainArgs {
     /// Sends your file contents from captured errors to the LLM.
     #[arg(short, long, default_value_t = false)]
     pub send_files: bool,
+    /// Include warnings when sending logs.
+    #[arg(short, long, default_value_t = false)]
+    pub warnings: bool,
 }
 
 #[derive(Parser)]
