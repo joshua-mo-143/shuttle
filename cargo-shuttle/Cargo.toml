@@ -1,6 +1,6 @@
 [package]
 name = "cargo-shuttle"
-version = "0.47.0"
+version = "0.47.0-poc"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,7 +10,10 @@ homepage = "https://www.shuttle.rs"
 [dependencies]
 shuttle-api-client = { workspace = true, default-features = true }
 shuttle-common = { workspace = true, features = ["models"] }
-shuttle-proto = { workspace = true, features = ["provisioner", "runtime-client"] }
+shuttle-proto = { workspace = true, features = [
+    "provisioner",
+    "runtime-client",
+] }
 shuttle-service = { workspace = true, features = ["builder", "runner"] }
 
 anyhow = { workspace = true }
@@ -22,15 +25,17 @@ clap = { workspace = true, features = ["env"] }
 clap_complete = "4.3.1"
 clap_mangen = "0.2.15"
 crossterm = { workspace = true }
-dialoguer = { version = "0.11", default-features = false, features = ["password"] }
+dialoguer = { version = "0.11", default-features = false, features = [
+    "password",
+] }
 dirs = { workspace = true }
 dunce = { workspace = true }
 flate2 = { workspace = true }
 futures = { workspace = true }
 git2 = { version = "0.18.1", default-features = false }
 gix = { version = "0.63.0", default-features = false, features = [
-  "blocking-http-transport-reqwest-rust-tls",
-  "worktree-mutation",
+    "blocking-http-transport-reqwest-rust-tls",
+    "worktree-mutation",
 ] }
 globset = "0.4.13"
 headers = { workspace = true }
@@ -56,9 +61,9 @@ toml_edit = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true, features = ["default"] }
 tracing-subscriber = { workspace = true, features = [
-  "default",
-  "env-filter",
-  "fmt",
+    "default",
+    "env-filter",
+    "fmt",
 ] }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
