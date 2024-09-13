@@ -234,7 +234,13 @@ impl ErrorLogManager {
 
         for log_raw in logs_by_latest {
             let thing: Vec<String> = log_raw.split("||").map(ToString::to_string).collect();
-            if thing[0].parse::<i64>().unwrap() != timestamp {
+
+            let log_timestamp = match thing[0].parse::<i64>() {
+                Ok(timestamp) => timestamp,
+                Err(e) => return Err(anyhow!("Got error: {e} on row {log_raw:?}")),
+            };
+
+            if log_timestamp != timestamp {
                 break;
             }
             let log = ErrorLog::try_new(thing).unwrap();
